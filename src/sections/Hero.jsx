@@ -43,6 +43,20 @@ export default function Hero() {
       raf = 0
     }
 
+    // Cards vanish around the title block (wordmark + subtitle). Measured only
+    // while the title is untransformed (not mid-intro, not scrolled).
+    const aim = () => {
+      const h1 = title.current?.querySelector('h1')
+      const sub = title.current?.querySelector('p')
+      if (!vortex || !h1 || !sub || window.scrollY > 40) return
+      const a = h1.getBoundingClientRect()
+      const b = sub.getBoundingClientRect()
+      const c = el.getBoundingClientRect()
+      const x0 = Math.min(a.left, b.left)
+      const y0 = Math.min(a.top, b.top)
+      vortex.setTitle(x0 - c.left, y0 - c.top, Math.max(a.right, b.right) - x0, Math.max(a.bottom, b.bottom) - y0)
+    }
+
     const img = new Image()
     img.decoding = 'async'
     img.src = atlasInfo.src
@@ -52,12 +66,19 @@ export default function Hero() {
       .then(() => {
         if (disposed) return
         vortex = new Vortex(el, img, works, { mobile })
+        aim()
+        document.fonts?.ready.then(aim)
+        setTimeout(aim, 1800) // after the title's intro transform has settled
         if (reducedMotion) vortex.intro = 0
         gsap.to(el, { opacity: 1, duration: 1.2, ease: 'power2.out' })
         start()
       })
 
-    const onResize = () => vortex && vortex.resize()
+    const onResize = () => {
+      if (!vortex) return
+      vortex.resize()
+      if (window.scrollY < 40) aim()
+    }
     const onMove = (e) => vortex && vortex.pointer(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5)
     const onVis = () => (document.hidden ? stop() : start())
     const io = new IntersectionObserver(([entry]) => {
@@ -77,7 +98,7 @@ export default function Hero() {
         if (!vortex) return
         const p = self.progress
         vortex.warp = p
-        vortex.alpha = 1 - gsap.utils.clamp(0, 1, (p - 0.55) / 0.38)
+        vortex.alpha = 1 - gsap.utils.clamp(0, 1, (p - 0.7) / 0.2)
       },
     })
 
@@ -103,9 +124,9 @@ export default function Hero() {
       gsap.fromTo(corners.current.children, { autoAlpha: 0 }, { autoAlpha: 1, duration: 1, delay: 0.8 })
 
       const tl = gsap.timeline({
-        scrollTrigger: { trigger: wrap.current, start: 'top top', end: '20% top', scrub: true },
+        scrollTrigger: { trigger: wrap.current, start: 'top top', end: '16% top', scrub: true },
       })
-      tl.to(title.current, { scale: 0.94, autoAlpha: 0, filter: 'blur(16px)', ease: 'power1.in', duration: 1 }, 0)
+      tl.to(title.current, { scale: 0.86, autoAlpha: 0, filter: 'blur(5px)', ease: 'power1.in', duration: 1 }, 0)
       tl.to(corners.current, { autoAlpha: 0, duration: 0.3 }, 0)
     })
     return () => ctx.revert()
@@ -118,7 +139,7 @@ export default function Hero() {
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex h-svh items-center justify-center px-4">
           <div ref={title} className="pointer-events-auto flex flex-col items-center text-center will-change-transform">
-            <h1 className="text-glow font-display text-[clamp(40px,15vw,128px)] font-[650] leading-[0.9] tracking-[-0.045em] sm:text-[clamp(40px,8.1vw,150px)]">
+            <h1 className="text-glow font-display text-[clamp(40px,15vw,128px)] font-[650] leading-[0.9] tracking-[-0.045em] sm:text-[clamp(40px,6.6vw,124px)]">
               <span className="sr-only">{site.name}, {site.role}</span>
               <span aria-hidden="true" className="block max-[520px]:hidden">
                 {site.wordmark}
@@ -127,7 +148,7 @@ export default function Hero() {
               <span aria-hidden="true" className="hidden max-[520px]:block">
                 SAIMA
                 <br />
-                AHMED
+                AHMAD
                 <sup className="ml-[0.06em] align-[0.95em] text-[0.26em] font-semibold tracking-normal">©</sup>
               </span>
             </h1>

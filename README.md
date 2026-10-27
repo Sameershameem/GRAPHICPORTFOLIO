@@ -1,4 +1,4 @@
-# Saima Ahmed — Graphic Design Portfolio
+# Saima Ahmad — Graphic Design Portfolio
 
 React + Vite + Tailwind CSS v4, animated with GSAP ScrollTrigger and Lenis smooth scrolling.
 

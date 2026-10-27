@@ -123,22 +123,27 @@ export default function Journey() {
         </a>
       </div>
 
-      <footer className="absolute inset-x-0 bottom-0 flex flex-col items-center justify-between gap-2 px-5 pb-[max(18px,env(safe-area-inset-bottom))] text-[11px] text-muted sm:flex-row">
+      <footer className="absolute inset-x-0 bottom-0 flex flex-col items-center justify-between gap-1.5 px-5 pb-[max(18px,env(safe-area-inset-bottom))] text-center text-[11px] text-muted sm:flex-row sm:gap-2">
         <span>
           © {site.year} {site.name} · {site.role}
         </span>
+        <span>
+          Designed and built by{' '}
+          <a
+            href={site.credit.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-fg/80 underline decoration-fg/30 underline-offset-2 transition-colors hover:text-fg hover:decoration-fg"
+          >
+            {site.credit.name}
+          </a>
+        </span>
         <nav className="flex gap-4">
-          <a href={site.instagram} target="_blank" rel="noreferrer" className="hover:text-fg">
-            Instagram
-          </a>
-          <a href={site.behance} target="_blank" rel="noreferrer" className="hover:text-fg">
-            Behance
-          </a>
           <a href={site.linkedin} target="_blank" rel="noreferrer" className="hover:text-fg">
             LinkedIn
           </a>
           <a href={mailto} className="hover:text-fg">
-            Email
+            {site.email}
           </a>
         </nav>
       </footer>
