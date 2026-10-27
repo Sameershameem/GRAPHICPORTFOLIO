@@ -1,0 +1,160 @@
+@import 'tailwindcss';
+
+@custom-variant light (&:where([data-theme='light'], [data-theme='light'] *));
+
+:root {
+  --bg: #0b0b0c;
+  --bg-rgb: 11 11 12;
+  --fg: #f4f4f2;
+  --fg-rgb: 244 244 242;
+  --muted: rgb(244 244 242 / 0.55);
+  --faint: rgb(244 244 242 / 0.08);
+  --line: rgb(255 255 255 / 0.1);
+  --panel: rgb(30 30 32 / 0.62);
+  --panel-solid: #141415;
+  --glow: rgb(255 255 255 / 0.55);
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --bg: #f2f1ee;
+  --bg-rgb: 242 241 238;
+  --fg: #111112;
+  --fg-rgb: 17 17 18;
+  --muted: rgb(17 17 18 / 0.55);
+  --faint: rgb(17 17 18 / 0.06);
+  --line: rgb(0 0 0 / 0.1);
+  --panel: rgb(255 255 255 / 0.7);
+  --panel-solid: #e7e6e2;
+  --glow: rgb(0 0 0 / 0.12);
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-panel: var(--panel);
+  --color-panel-solid: var(--panel-solid);
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Manrope Variable', 'Inter Variable', ui-sans-serif, sans-serif;
+  --font-serif: 'Newsreader Variable', ui-serif, Georgia, serif;
+}
+
+@layer base {
+  html {
+    background: var(--bg);
+    color: var(--fg);
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: clip;
+    transition: background-color 0.5s ease, color 0.5s ease;
+  }
+  img {
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+  ::selection {
+    background: var(--fg);
+    color: var(--bg);
+  }
+}
+
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+@layer components {
+  .serif-head {
+    font-family: var(--font-serif);
+    font-variation-settings: 'opsz' 72;
+    font-weight: 400;
+    letter-spacing: -0.025em;
+    line-height: 0.98;
+  }
+  .text-glow {
+    text-shadow:
+      0 0 18px rgb(255 255 255 / 0.45),
+      0 0 42px rgb(255 255 255 / 0.18);
+  }
+  [data-theme='light'] .text-glow {
+    text-shadow: none;
+  }
+  .soft-glow {
+    text-shadow: 0 0 14px rgb(255 255 255 / 0.28);
+  }
+  [data-theme='light'] .soft-glow {
+    text-shadow: none;
+  }
+  .btn-glow {
+    background: #fff;
+    color: #111;
+    box-shadow:
+      0 0 10px rgb(255 255 255 / 0.9),
+      0 0 26px rgb(255 255 255 / 0.55),
+      0 0 60px rgb(190 205 255 / 0.35);
+  }
+  .btn-glow-xl {
+    box-shadow:
+      0 0 14px rgb(255 255 255 / 0.95),
+      0 0 36px rgb(255 255 255 / 0.6),
+      0 0 90px rgb(190 205 255 / 0.45);
+  }
+  [data-theme='light'] .btn-glow {
+    background: #111;
+    color: #fff;
+    box-shadow:
+      0 8px 24px rgb(0 0 0 / 0.18),
+      0 0 0 1px rgb(0 0 0 / 0.9);
+  }
+  .glass {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+  }
+  .card-shadow {
+    box-shadow: 0 18px 40px -12px rgb(0 0 0 / 0.65);
+  }
+  [data-theme='light'] .card-shadow {
+    box-shadow: 0 18px 40px -16px rgb(0 0 0 / 0.35);
+  }
+  .echo {
+    position: relative;
+    display: block;
+  }
+  .echo > .echo-ghost {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    user-select: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
