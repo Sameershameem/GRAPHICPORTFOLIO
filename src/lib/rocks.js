@@ -55,35 +55,64 @@ function rockGeometry(seed, detail) {
   const sx = 0.8 + hash(seed, 1, 2) * 0.5
   const sy = 0.65 + hash(seed, 3, 4) * 0.35
   const sz = 0.75 + hash(seed, 5, 6) * 0.4
+  // The geometry is non-indexed: every corner is shared by ~6 triangles, so
+  // displace each distinct point once.
+  const seen = new Map()
   for (let i = 0; i < pos.count; i++) {
     const x = pos.getX(i)
     const y = pos.getY(i)
     const z = pos.getZ(i)
-    const big = fbm(x * 1.1 + seed, y * 1.1, z * 1.1, 3)
-    const fine = fbm(x * 4 + seed * 2, y * 4, z * 4, 3)
-    // Flatten some faces for a chipped, faceted silhouette
-    const facet = Math.max(0, fbm(x * 0.9 - seed, y * 0.9, z * 0.9, 2) - 0.55) * 1.4
-    const d = 0.72 + big * 0.55 + fine * 0.12 - facet
+    const key = `${Math.round(x * 1e4)},${Math.round(y * 1e4)},${Math.round(z * 1e4)}`
+    let d = seen.get(key)
+    if (d === undefined) {
+      const big = fbm(x * 1.1 + seed, y * 1.1, z * 1.1, 3)
+      const fine = fbm(x * 4 + seed * 2, y * 4, z * 4, 3)
+      // Flatten some faces for a chipped, faceted silhouette
+      const facet = Math.max(0, fbm(x * 0.9 - seed, y * 0.9, z * 0.9, 2) - 0.55) * 1.4
+      d = 0.72 + big * 0.55 + fine * 0.12 - facet
+      seen.set(key, d)
+    }
     pos.setXYZ(i, x * d * sx, y * d * sy, z * d * sz)
   }
   g.computeVertexNormals()
   return g
 }
 
-function grainTexture(size) {
+// Scratch canvas that works on the page and in a worker.
+const makeCanvas = (size) => {
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(size, size)
   const c = document.createElement('canvas')
   c.width = c.height = size
+  return c
+}
+
+// Rock-surface grain for the bump map: a few octaves of random value noise,
+// each a tiny random grid scaled up smoothly (cheap canvas work instead of
+// evaluating noise per pixel), plus fine per-pixel speckle.
+function grainTexture(size) {
+  const c = makeCanvas(size)
   const x = c.getContext('2d')
-  const img = x.createImageData(size, size)
-  for (let i = 0; i < size * size; i++) {
-    const px = i % size
-    const py = (i / size) | 0
-    const n = fbm(px / 18, py / 18, 0.5, 4) * 0.7 + Math.random() * 0.3
-    const v = Math.floor(n * 255)
-    img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v
-    img.data[i * 4 + 3] = 255
+  x.fillStyle = '#808080'
+  x.fillRect(0, 0, size, size)
+  x.imageSmoothingEnabled = true
+  for (const [cells, alpha] of [
+    [Math.max(2, size / 16), 0.55],
+    [Math.max(2, size / 8), 0.4],
+    [Math.max(2, size / 4), 0.3],
+    [size, 0.3],
+  ]) {
+    const t = makeCanvas(cells)
+    const tx = t.getContext('2d')
+    const img = tx.createImageData(cells, cells)
+    for (let i = 0; i < cells * cells; i++) {
+      const v = (Math.random() * 256) | 0
+      img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v
+      img.data[i * 4 + 3] = 255
+    }
+    tx.putImageData(img, 0, 0)
+    x.globalAlpha = alpha
+    x.drawImage(t, 0, 0, size, size)
   }
-  x.putImageData(img, 0, 0)
   const t = new CanvasTexture(c)
   t.wrapS = t.wrapT = RepeatWrapping
   return t
@@ -100,9 +129,16 @@ const LAYOUT = [
   { x: -0.3, y: -1.25, s: 0.22, z: -1.6 },
 ]
 
-export function createRocks(canvas, { mobile = false } = {}) {
-  const renderer = new WebGLRenderer({ canvas, antialias: !mobile, alpha: true, powerPreference: 'high-performance' })
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, mobile ? 1.3 : 2))
+// Hand the thread back between build steps so building never stalls a frame.
+const idle = () =>
+  new Promise((resolve) => (globalThis.requestIdleCallback ? requestIdleCallback(() => resolve(), { timeout: 500 }) : setTimeout(resolve, 30)))
+
+// Builds the scene in small idle-time steps (on the page, or in a worker with
+// an OffscreenCanvas, see offscreen.js). settings: the quality tier's settings
+// (lib/perf.js). Resolves with the engine; call resize() before drawing.
+export async function createRocks(canvas, { settings }) {
+  const detail = settings.rocksDetail
+  const renderer = new WebGLRenderer({ canvas, antialias: settings.rocksAA, alpha: true })
   renderer.outputColorSpace = SRGBColorSpace
   const scene = new Scene()
   const camera = new PerspectiveCamera(35, 1, 0.1, 100)
@@ -114,74 +150,91 @@ export function createRocks(canvas, { mobile = false } = {}) {
   rim.position.set(4, -2, -3)
   scene.add(key, rim, new HemisphereLight(0xffffff, 0x1a1a1a, 0.55))
 
-  const grain = grainTexture(mobile ? 128 : 256)
+  await idle()
+  const grain = grainTexture(detail >= 5 ? 256 : 128)
   const mat = new MeshStandardMaterial({ color: 0xb4afa8, roughness: 0.96, metalness: 0, bumpMap: grain, bumpScale: 2.2 })
 
   const group = new Group()
   scene.add(group)
-  const rocks = LAYOUT.map((l, i) => {
-    const m = new Mesh(rockGeometry(i * 13.37 + 2, mobile ? 4 : 5), mat)
-    m.userData = { ...l, phase: i * 1.7, spin: [(hash(i, 9, 1) - 0.5) * 0.5, (hash(i, 2, 7) - 0.5) * 0.6] }
+  const rocks = []
+  for (let i = 0; i < LAYOUT.length; i++) {
+    await idle()
+    const m = new Mesh(rockGeometry(i * 13.37 + 2, detail), mat)
+    m.userData = { ...LAYOUT[i], phase: i * 1.7, spin: [(hash(i, 9, 1) - 0.5) * 0.5, (hash(i, 2, 7) - 0.5) * 0.6] }
     m.rotation.set(hash(i, 1, 1) * 6, hash(i, 2, 2) * 6, hash(i, 3, 3) * 6)
     group.add(m)
-    return m
-  })
+    rocks.push(m)
+  }
 
-  let w = 1
-  let h = 1
+  let w = 0
+  let h = 0
+  let ratio = 0
   let spread = 1
   let spreadY = 1
-  const resize = () => {
-    w = canvas.clientWidth
-    h = canvas.clientHeight
-    renderer.setSize(w, h, false)
-    camera.aspect = w / h
-    camera.updateProjectionMatrix()
-    // Narrow screens: tighter, smaller ring that opens up vertically so the
-    // rocks frame the headline instead of covering it.
-    const aspect = w / h
-    spread = Math.min(1, aspect * 0.9) * 1.25
-    spreadY = aspect < 1 ? 1.55 : 1
-    const size = aspect < 1 ? Math.max(0.5, aspect / 1.4) : 1.12
-    rocks.forEach((m) => m.scale.setScalar(m.userData.s * size))
-  }
-  resize()
-
   let px = 0
   let py = 0
   let tx = 0
   let ty = 0
   let enter = 0
-  const state = { enter: 0 }
+  let enterTarget = 0
 
-  const render = (t, dt) => {
-    px += (tx - px) * 0.04
-    py += (ty - py) * 0.04
-    enter += (state.enter - enter) * Math.min(1, dt * 3)
-    rocks.forEach((m) => {
-      const u = m.userData
-      m.rotation.x += u.spin[0] * dt
-      m.rotation.y += u.spin[1] * dt
-      const bob = Math.sin(t * 0.6 + u.phase) * 0.06
-      const e = 1 - enter
-      m.position.set(u.x * spread * (1 + e * 0.6), u.y * 0.92 * spreadY + bob - e * 2.6, u.z + e * 2)
-    })
-    group.rotation.y = px * 0.18
-    group.rotation.x = py * 0.1
-    renderer.render(scene, camera)
-  }
-
-  // Compile shaders + upload buffers now (offscreen) rather than on first visible frame.
-  renderer.compile(scene, camera)
+  // Compile shaders without blocking (parallel compile where supported), then
+  // draw once offscreen so buffers and textures are uploaded before it's seen.
+  await renderer.compileAsync(scene, camera)
+  await idle()
   renderer.render(scene, camera)
 
   return {
-    state,
-    resize,
-    render,
+    // Canvas size in CSS pixels and the pixel ratio to draw at.
+    resize(nw, nh, dpr) {
+      // Resizing a WebGL canvas re-allocates its buffers: only on real changes.
+      if (nw === w && nh === h && dpr === ratio) return
+      w = nw
+      h = nh
+      ratio = dpr
+      renderer.setPixelRatio(dpr)
+      renderer.setSize(w, h, false)
+      camera.aspect = w / h
+      camera.updateProjectionMatrix()
+      // Narrow screens: tighter, smaller ring that opens up vertically so the
+      // rocks frame the headline instead of covering it.
+      const aspect = w / h
+      spread = Math.min(1, aspect * 0.9) * 1.25
+      spreadY = aspect < 1 ? 1.55 : 1
+      const size = aspect < 1 ? Math.max(0.5, aspect / 1.4) : 1.12
+      rocks.forEach((m) => m.scale.setScalar(m.userData.s * size))
+    },
+    // Scroll progress of the section's entrance (rocks drift in from below).
+    setEnter(p) {
+      enterTarget = p
+    },
     pointer(nx, ny) {
       tx = nx
       ty = ny
+    },
+    setSettings(s) {
+      settings = s
+    },
+    // Lighter devices draw the slow-moving rocks at a lower frame rate.
+    get fps() {
+      return settings.rocksFps < 60 ? settings.rocksFps : 0
+    },
+    frame(t, dt) {
+      if (!w) return
+      px += (tx - px) * 0.04
+      py += (ty - py) * 0.04
+      enter += (enterTarget - enter) * Math.min(1, dt * 3)
+      rocks.forEach((m) => {
+        const u = m.userData
+        m.rotation.x += u.spin[0] * dt
+        m.rotation.y += u.spin[1] * dt
+        const bob = Math.sin(t * 0.6 + u.phase) * 0.06
+        const e = 1 - enter
+        m.position.set(u.x * spread * (1 + e * 0.6), u.y * 0.92 * spreadY + bob - e * 2.6, u.z + e * 2)
+      })
+      group.rotation.y = px * 0.18
+      group.rotation.x = py * 0.1
+      renderer.render(scene, camera)
     },
     dispose() {
       rocks.forEach((m) => m.geometry.dispose())
@@ -191,3 +244,5 @@ export function createRocks(canvas, { mobile = false } = {}) {
     },
   }
 }
+
+export const create = createRocks

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef } from 'react'
-import { gsap, isTouch, lerp, clamp } from '../lib/motion'
+import { gsap, isTouch, lerp, clamp, setStyle } from '../lib/motion'
+import { quality } from '../lib/perf'
 import { echoIn, echoOut } from '../lib/echo'
 import { useViewport } from '../lib/useViewport'
 import { computeLayout, SHARED_ID, FEATURED_ID } from '../lib/showcaseLayout'
@@ -19,13 +20,16 @@ const tags = [
 ]
 const UNITS = 8.35
 
-function Card({ work, icon, eager, className = '', imgRef }) {
+// size: displayed width in CSS px (picks the image file).
+function Card({ work, icon, eager, size, className = '', imgRef }) {
   const Icon = badge[icon]
   return (
     <div className={`card-shadow relative h-full w-full overflow-hidden rounded-[3px] bg-faint ${className}`}>
       <img
         ref={imgRef}
         src={work.sm}
+        srcSet={work.srcSet}
+        sizes={`${Math.round(size)}px`}
         alt={`${work.title} — ${work.client}`}
         width={work.w}
         height={work.h}
@@ -65,7 +69,8 @@ export default function Showcase() {
 
   useLayoutEffect(() => {
     const $ = r.current
-    const blur = !isTouch
+    // Extra image highlight during the scan, where filters are cheap.
+    const rich = quality.s.filters
     const ctx = gsap.context(() => {
       const p = { drift: 0, fly: 0, land: 0, rise: 0, gridIn: 0, scroll: 0, dim: 0, pop: 0 }
       const inOut = gsap.parseEase('power2.inOut')
@@ -74,11 +79,11 @@ export default function Showcase() {
 
       const render = () => {
         const panelY = (1 - out(p.rise)) * riseDist - L.scrollD * p.scroll
-        $.panel.style.transform = `translate3d(0,${panelY}px,0)`
+        setStyle($.panel, 'transform', `translate3d(0,${panelY}px,0)`)
 
         L.scatter.forEach((c, i) => {
           if (c.id === SHARED_ID) return
-          outer.current[i].style.transform = `translate3d(0,${-p.drift * c.d * 0.08 * L.H}px,0)`
+          setStyle(outer.current[i], 'transform', `translate3d(0,${-p.drift * c.d * 0.08 * L.H}px,0)`)
         })
 
         // Shared card: scatter -> mid air -> collection slot (tracks the rising panel)
@@ -87,90 +92,97 @@ export default function Showcase() {
           land <= 0
             ? lerpRect(shift(L.sharedScatter, sDrift), L.mid, inOut(clamp(fly)))
             : lerpRect(L.mid, shift(L.sharedSlot, panelY), inOut(clamp(land)))
-        $.shared.style.transform = tr(at(p.fly, p.land), sharedBase)
-        $.shared.style.opacity = 1 - p.dim
+        setStyle($.shared, 'transform', tr(at(p.fly, p.land), sharedBase))
+        setStyle($.shared, 'opacity', 1 - p.dim)
         const moving = Math.sin(Math.PI * clamp(p.fly)) + Math.sin(Math.PI * clamp(p.land))
         $.sharedGhosts.forEach((g, k) => {
           const lag = (k + 1) * 0.11
-          g.style.transform = tr(at(p.fly - lag, p.land > 0 ? p.land - lag : 0), sharedBase)
-          g.style.opacity = moving * (0.32 - k * 0.12)
+          const o = moving * (0.32 - k * 0.12)
+          setStyle(g, 'opacity', o)
+          if (o > 0) setStyle(g, 'transform', tr(at(p.fly - lag, p.land > 0 ? p.land - lag : 0), sharedBase))
         })
 
         // Grid items fade in one by one, then dim away while the featured card pops out
         gridEls.current.forEach((el, i) => {
           if (!el) return
           const a = clamp(p.gridIn * 1.9 - i * 0.07)
-          el.style.opacity = a * (1 - p.dim)
-          el.style.transform = `translate3d(0,${(1 - a) * 22}px,0)`
+          setStyle(el, 'opacity', a * (1 - p.dim))
+          setStyle(el, 'transform', `translate3d(0,${(1 - a) * 22}px,0)`)
         })
-        $.panelBg.style.opacity = 1 - p.dim * 0.85
+        setStyle($.panelBg, 'opacity', 1 - p.dim * 0.85)
 
         const featIn = clamp(p.gridIn * 1.9 - (L.cols - 1) * 0.07)
         const fr = lerpRect(shift(L.featuredSlot, panelY + (1 - featIn) * 22), L.featured, inOut(clamp(p.pop)))
-        $.feat.style.transform = tr(fr, L.featured.w)
-        $.feat.style.opacity = p.pop > 0 ? 1 : featIn
+        setStyle($.feat, 'transform', tr(fr, L.featured.w))
+        setStyle($.feat, 'opacity', p.pop > 0 ? 1 : featIn)
       }
 
       const tl = gsap.timeline({
         defaults: { ease: 'none' },
         onUpdate: render,
-        scrollTrigger: { trigger: wrap.current, start: 'top top', end: 'bottom bottom', scrub: isTouch ? 0.5 : true },
+        // Touch: native scrolling is already smooth, so only a short catch-up.
+        scrollTrigger: { trigger: wrap.current, start: 'top top', end: 'bottom bottom', scrub: isTouch ? 0.2 : true },
       })
 
       // Section 2 — scattered work
       const ins = inner.current.filter(Boolean)
       tl.fromTo(
         ins,
-        { autoAlpha: 0, scale: 0.9, filter: blur ? 'blur(10px)' : 'none' },
-        { autoAlpha: 1, scale: 1, filter: 'blur(0px)', duration: 0.5, ease: 'power2.out', stagger: { each: 0.035, from: 'random' } },
+        { autoAlpha: 0, scale: 0.9, blur: 10 },
+        { autoAlpha: 1, scale: 1, blur: 0, duration: 0.5, ease: 'power2.out', stagger: { each: 0.035, from: 'random' } },
         0.02,
       )
       tl.to(p, { drift: 1, duration: 2.95 }, 0)
-      echoIn(tl, $.headA, 0.12, { blur })
+      echoIn(tl, $.headA, 0.12)
       tl.fromTo($.subA, { autoAlpha: 0, yPercent: 60 }, { autoAlpha: 1, yPercent: 0, duration: 0.4, ease: 'power2.out' }, 0.32)
 
-      echoOut(tl, $.headA, 1.6, { blur })
+      echoOut(tl, $.headA, 1.6)
       tl.to($.subA, { autoAlpha: 0, yPercent: -60, duration: 0.3, ease: 'power2.in' }, 1.62)
-      echoIn(tl, $.headB, 1.86, { blur })
+      echoIn(tl, $.headB, 1.86)
       tl.fromTo(
         $.subB.children,
-        { autoAlpha: 0, yPercent: 70, filter: blur ? 'blur(6px)' : 'none' },
-        { autoAlpha: 1, yPercent: 0, filter: 'blur(0px)', duration: 0.35, stagger: 0.06, ease: 'power2.out' },
+        { autoAlpha: 0, yPercent: 70, blur: 6 },
+        { autoAlpha: 1, yPercent: 0, blur: 0, duration: 0.35, stagger: 0.06, ease: 'power2.out' },
         2.05,
       )
 
       // Everything but the shared card leaves; it gets "picked up"
       const others = inner.current.filter((el, i) => el && L.scatter[i].id !== SHARED_ID)
-      tl.to(others, { autoAlpha: 0, scale: 0.9, filter: blur ? 'blur(10px)' : 'none', duration: 0.45, stagger: 0.025, ease: 'power2.in' }, 2.92)
-      echoOut(tl, $.headB, 2.9, { blur })
+      tl.to(others, { autoAlpha: 0, scale: 0.9, blur: 10, duration: 0.45, stagger: 0.025, ease: 'power2.in' }, 2.92)
+      echoOut(tl, $.headB, 2.9)
       tl.to($.subB.children, { autoAlpha: 0, yPercent: -60, duration: 0.3, stagger: 0.04, ease: 'power2.in' }, 2.92)
       tl.to(p, { fly: 1, duration: 0.55 }, 2.98)
-      tl.fromTo($.menu, { autoAlpha: 0, scale: 0.94, filter: 'blur(8px)' }, { autoAlpha: 1, scale: 1, filter: 'blur(0px)', duration: 0.22, ease: 'power2.out' }, 3.28)
+      tl.fromTo(
+        $.menu,
+        { autoAlpha: 0, scale: 0.94, blur: 8 },
+        { autoAlpha: 1, scale: 1, blur: 0, duration: 0.22, ease: 'power2.out' },
+        3.28,
+      )
       tl.fromTo($.menuPick, { backgroundColor: 'rgba(255,255,255,0)' }, { backgroundColor: 'rgba(255,255,255,0.14)', duration: 0.08 }, 3.44)
-      tl.to($.menu, { autoAlpha: 0, y: -8, filter: 'blur(6px)', duration: 0.18 }, 3.6)
+      tl.to($.menu, { autoAlpha: 0, y: -8, blur: 6, duration: 0.18 }, 3.6)
 
       // Section 3 — the collection rises and the card lands in it
       tl.to(p, { rise: 1, duration: 0.95 }, 3.42)
       tl.to(p, { land: 1, duration: 0.7 }, 3.68)
-      echoIn(tl, $.head3, 3.72, { blur })
+      echoIn(tl, $.head3, 3.72)
       tl.fromTo($.para3, { autoAlpha: 0, yPercent: 40 }, { autoAlpha: 1, yPercent: 0, duration: 0.4, ease: 'power2.out' }, 3.92)
       tl.to(p, { gridIn: 1, duration: 0.65 }, 3.95)
 
       // Collection scrolls away; the featured card stays and moves into focus
       tl.to(p, { scroll: 1, duration: 1.45 }, 5.15)
-      echoOut(tl, $.head3, 5.15, { blur, dist: 80 })
+      echoOut(tl, $.head3, 5.15, { dist: 80 })
       tl.to($.para3, { autoAlpha: 0, y: -L.H * 0.12, duration: 0.45, ease: 'power1.in' }, 5.15)
       tl.to(p, { dim: 1, duration: 0.9 }, 5.55)
       tl.to(p, { pop: 1, duration: 1.15 }, 5.55)
 
       // Section 4 — detail scan + tags
       tl.fromTo($.scan, { yPercent: 101, autoAlpha: 1 }, { yPercent: 0, duration: 0.42, ease: 'power2.out' }, 6.72)
-      tl.fromTo($.featImg, { filter: 'brightness(1) saturate(1)' }, { filter: 'brightness(1.22) saturate(0.75)', duration: 0.35 }, 6.75)
+      if (rich) tl.fromTo($.featImg, { filter: 'brightness(1) saturate(1)' }, { filter: 'brightness(1.22) saturate(0.75)', duration: 0.35 }, 6.75)
       tl.fromTo($.dots, { autoAlpha: 0, scale: 0.8 }, { autoAlpha: 1, scale: 1, duration: 0.15, ease: 'back.out(2)' }, 7.0)
-      echoIn(tl, $.head4, 7.1, { blur })
+      echoIn(tl, $.head4, 7.1)
       tl.fromTo($.para4, { autoAlpha: 0, yPercent: 30 }, { autoAlpha: 1, yPercent: 0, duration: 0.4, ease: 'power2.out' }, 7.35)
       tl.to($.scan, { autoAlpha: 0, duration: 0.3 }, 7.35)
-      tl.to($.featImg, { filter: 'brightness(1) saturate(1)', duration: 0.35 }, 7.4)
+      if (rich) tl.to($.featImg, { filter: 'brightness(1) saturate(1)', duration: 0.35 }, 7.4)
       tl.fromTo(
         $.tags.children,
         { autoAlpha: 0, scale: 0.7, y: 10 },
@@ -221,7 +233,7 @@ export default function Showcase() {
                       </span>
                     </figure>
                   ) : (
-                    <Card work={c.work} icon={c.icon} eager />
+                    <Card work={c.work} icon={c.icon} size={c.r.w} eager />
                   )}
                 </div>
               </div>
@@ -291,7 +303,7 @@ export default function Showcase() {
                   className="absolute"
                   style={{ left: g.r.x, top: g.r.y, width: g.r.w, height: g.r.h, opacity: 0 }}
                 >
-                  <Card work={g.work} icon={g.work.tag === 'Packaging' ? 'box' : g.i % 3 === 1 ? 'print' : 'ig'} />
+                  <Card work={g.work} icon={g.work.tag === 'Packaging' ? 'box' : g.i % 3 === 1 ? 'print' : 'ig'} size={g.r.w} />
                 </div>
               ),
             )}
@@ -319,7 +331,7 @@ export default function Showcase() {
               className="pointer-events-none absolute left-0 top-0 origin-top-left overflow-hidden rounded-[3px] will-change-transform"
               style={{ width: sharedBase, height: sharedBase / shared.ratio, opacity: 0 }}
             >
-              <img src={shared.sm} alt="" className="h-full w-full object-cover opacity-80 brightness-125" />
+              <img src={shared.sm} srcSet={shared.srcSet} sizes={`${Math.round(sharedBase)}px`} alt="" className="h-full w-full object-cover opacity-80 brightness-125" />
             </div>
           ))}
           <div
@@ -328,7 +340,7 @@ export default function Showcase() {
             style={{ width: sharedBase, height: sharedBase / shared.ratio }}
           >
             <div ref={(el) => (inner.current[L.scatter.findIndex((c) => c.id === SHARED_ID)] = el)} className="h-full w-full" style={{ visibility: 'hidden' }}>
-              <Card work={shared} icon="ig" eager />
+              <Card work={shared} icon="ig" size={sharedBase} eager />
             </div>
           </div>
 
@@ -364,7 +376,7 @@ export default function Showcase() {
                 decoding="async"
                 className="h-full w-full object-cover"
               />
-              <div ref={set('scan')} className="absolute inset-x-0 bottom-0 h-[34%] bg-white/35 backdrop-blur-md" style={{ visibility: 'hidden' }} />
+              <div ref={set('scan')} className="fx-glass-light absolute inset-x-0 bottom-0 h-[34%] bg-white/35 backdrop-blur-md" style={{ visibility: 'hidden' }} />
               <div
                 ref={set('dots')}
                 className="absolute bottom-[6%] right-[6%] flex gap-1 rounded-full bg-white/80 px-2 py-1.5"

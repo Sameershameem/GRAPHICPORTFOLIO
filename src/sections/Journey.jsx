@@ -1,70 +1,75 @@
 import { useEffect, useRef } from 'react'
 import { gsap, ScrollTrigger, isTouch } from '../lib/motion'
+import { quality, onQualityChange, reportSlow } from '../lib/perf'
+import { startCanvas } from '../lib/offscreen'
 import { echoIn } from '../lib/echo'
 import { site, mailto } from '../data/site'
 import Echo from '../components/Echo'
 
 export default function Journey() {
   const root = useRef(null)
-  const canvas = useRef(null)
+  const rocksBox = useRef(null)
   const kicker = useRef(null)
   const head = useRef(null)
   const btn = useRef(null)
 
-  // 3D rocks — three.js is only fetched when this section gets close
+  // 3D rocks, on their own thread where possible (see offscreen.js), so
+  // fetching three.js, building the scene and drawing it never compete with
+  // scrolling. Built shortly after the page settles, or as soon as this
+  // section gets close.
   useEffect(() => {
-    let scene
-    let raf = 0
-    let last = 0
+    let rocks
     let visible = false
     let disposed = false
-    const mobile = window.innerWidth < 768 || isTouch
+    let building = false
+    let timer
+    let el
+    const box = rocksBox.current
+    const resize = () => rocks && rocks.call('resize', box.clientWidth, box.clientHeight, Math.min(window.devicePixelRatio || 1, quality.s.rocksDpr))
+    const run = () => rocks && rocks.run(visible && !document.hidden)
 
-    const loop = (t) => {
-      raf = requestAnimationFrame(loop)
-      const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016)
-      last = t
-      scene.render(t / 1000, dt)
+    const build = () => {
+      if (building || disposed) return
+      building = true
+      near.disconnect()
+      clearTimeout(timer)
+      el = document.createElement('canvas')
+      el.className = 'absolute inset-0 h-full w-full'
+      box.appendChild(el)
+      startCanvas({
+        canvas: el,
+        context: 'webgl',
+        worker: () => new Worker(new URL('../lib/rocks.worker.js', import.meta.url), { type: 'module' }),
+        load: () => import('../lib/rocks'),
+        onSlow: reportSlow,
+        options: { settings: quality.s },
+      })
+        .then((r) => {
+          if (disposed) return r.dispose()
+          rocks = r
+          resize()
+          rocks.call('setEnter', st.progress)
+          run()
+        })
+        .catch(() => {}) // no WebGL: the section still works without rocks
     }
-    const start = () => {
-      if (scene && visible && !raf && !document.hidden) {
-        last = 0
-        raf = requestAnimationFrame(loop)
-      }
-    }
-    const stop = () => {
-      cancelAnimationFrame(raf)
-      raf = 0
-    }
-
-    const near = new IntersectionObserver(
-      ([e]) => {
-        if (!e.isIntersecting || scene) return
-        near.disconnect()
-        // Build the scene in idle time so geometry + shader work never lands mid-scroll.
-        const idle = window.requestIdleCallback || ((cb) => setTimeout(cb, 120))
-        import('../lib/rocks').then(({ createRocks }) =>
-          idle(
-            () => {
-              if (disposed) return
-              try {
-                scene = createRocks(canvas.current, { mobile })
-              } catch {
-                return // no WebGL: the section still works without rocks
-              }
-              start()
-            },
-            { timeout: 1500 },
-          ),
-        )
-      },
-      { rootMargin: '250% 0px' },
-    )
+    const near = new IntersectionObserver(([e]) => e.isIntersecting && build(), { rootMargin: '200% 0px' })
     near.observe(root.current)
+    // Also build early, in idle time after load, unless Data Saver is on (then
+    // only once the visitor heads this way).
+    const early = () => (timer = setTimeout(() => (window.requestIdleCallback || setTimeout)(build, { timeout: 3000 }), 2500))
+    if (!navigator.connection?.saveData) {
+      if (document.readyState === 'complete') early()
+      else window.addEventListener('load', early, { once: true })
+    }
+    const offQuality = onQualityChange(() => {
+      rocks && rocks.call('setSettings', quality.s)
+      resize()
+    })
 
     const io = new IntersectionObserver(([e]) => {
       visible = e.isIntersecting
-      visible ? start() : stop()
+      run()
     })
     io.observe(root.current)
 
@@ -73,27 +78,28 @@ export default function Journey() {
       start: 'top 75%',
       end: 'top 10%',
       scrub: true,
-      onUpdate: (self) => scene && (scene.state.enter = self.progress),
-      onRefresh: (self) => scene && (scene.state.enter = self.progress),
+      onUpdate: (self) => rocks && rocks.call('setEnter', self.progress),
+      onRefresh: (self) => rocks && rocks.call('setEnter', self.progress),
     })
 
-    const onResize = () => scene && scene.resize()
-    const onMove = (e) => scene && scene.pointer(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5)
-    const onVis = () => (document.hidden ? stop() : start())
-    window.addEventListener('resize', onResize)
+    const onMove = (e) => rocks && rocks.call('pointer', e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5)
+    window.addEventListener('resize', resize)
     if (!isTouch) window.addEventListener('pointermove', onMove, { passive: true })
-    document.addEventListener('visibilitychange', onVis)
+    document.addEventListener('visibilitychange', run)
 
     return () => {
       disposed = true
-      stop()
+      rocks && rocks.dispose()
+      el && el.remove()
+      clearTimeout(timer)
+      offQuality()
       near.disconnect()
       io.disconnect()
       st.kill()
-      window.removeEventListener('resize', onResize)
+      window.removeEventListener('load', early)
+      window.removeEventListener('resize', resize)
       window.removeEventListener('pointermove', onMove)
-      document.removeEventListener('visibilitychange', onVis)
-      scene && scene.dispose()
+      document.removeEventListener('visibilitychange', run)
     }
   }, [])
 
@@ -101,7 +107,7 @@ export default function Journey() {
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({ paused: true })
       tl.fromTo(kicker.current, { autoAlpha: 0, y: 10 }, { autoAlpha: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 0)
-      echoIn(tl, head.current, 0.1, { blur: !isTouch })
+      echoIn(tl, head.current, 0.1)
       tl.fromTo(btn.current, { autoAlpha: 0, scale: 0.85 }, { autoAlpha: 1, scale: 1, duration: 0.8, ease: 'back.out(1.8)' }, 0.45)
       ScrollTrigger.create({ trigger: root.current, start: 'top 45%', once: true, onEnter: () => tl.play() })
     }, root)
@@ -110,7 +116,7 @@ export default function Journey() {
 
   return (
     <section id="contact" ref={root} className="relative flex h-svh min-h-[560px] flex-col items-center justify-center overflow-hidden">
-      <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full" aria-hidden="true" />
+      <div ref={rocksBox} className="pointer-events-none absolute inset-0" aria-hidden="true" />
       <div className="relative z-10 flex flex-col items-center px-6 text-center">
         <p ref={kicker} className="text-[11px] font-medium text-fg/75 sm:text-[clamp(11px,0.9vw,14px)]" style={{ visibility: 'hidden' }}>
           Have a project in mind?

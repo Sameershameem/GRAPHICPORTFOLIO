@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useSmoothScroll } from './lib/useSmoothScroll'
 import { ScrollTrigger } from './lib/motion'
+import { startFrameMeter } from './lib/perf'
 import Nav from './components/Nav'
 import Lightbox from './components/Lightbox'
 import Hero from './sections/Hero'
@@ -20,6 +21,9 @@ export default function App() {
     window.addEventListener('load', refresh)
     return () => window.removeEventListener('load', refresh)
   }, [])
+
+  // Lowers rendering quality on devices that can't keep up (see lib/perf.js).
+  useEffect(startFrameMeter, [])
 
   return (
     <>

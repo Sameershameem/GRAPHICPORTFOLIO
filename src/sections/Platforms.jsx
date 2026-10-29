@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { gsap, ScrollTrigger, isTouch, scrollToTarget } from '../lib/motion'
+import { gsap, ScrollTrigger, scrollToTarget } from '../lib/motion'
 import { echoIn } from '../lib/echo'
 import { openWork } from '../lib/lightbox'
 import { works, clients } from '../data/works'
@@ -112,18 +112,18 @@ export default function Platforms() {
       const tl = gsap.timeline({ paused: true })
       tl.fromTo(deskRef.current, { autoAlpha: 0, y: 140, x: 60 }, { autoAlpha: 1, y: 0, x: 0, duration: 1.3, ease: 'power3.out' }, 0)
       tl.fromTo(phoneRef.current, { autoAlpha: 0, y: 190 }, { autoAlpha: 1, y: 0, duration: 1.3, ease: 'power3.out' }, 0.12)
-      echoIn(tl, head.current, 0.3, { blur: !isTouch })
+      echoIn(tl, head.current, 0.3)
       tl.fromTo(copy.current.children, { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.6, stagger: 0.1, ease: 'power2.out' }, 0.55)
       ScrollTrigger.create({ trigger: root.current, start: 'top 70%', once: true, onEnter: () => tl.play() })
 
       gsap.fromTo(phoneRef.current.firstChild, { y: 30 }, { y: -40, ease: 'none', scrollTrigger: { trigger: root.current, start: 'top bottom', end: 'bottom top', scrub: true } })
 
       const bt = gsap.timeline({ paused: true })
-      echoIn(bt, brandHead.current, 0, { blur: !isTouch, dist: 80 })
+      echoIn(bt, brandHead.current, 0, { dist: 80 })
       bt.fromTo(
         brands.current.children,
-        { autoAlpha: 0, y: 30, filter: isTouch ? 'none' : 'blur(6px)' },
-        { autoAlpha: 1, y: 0, filter: isTouch ? 'none' : 'blur(0px)', duration: 0.7, stagger: 0.06, ease: 'power3.out' },
+        { autoAlpha: 0, y: 30, blur: 6 },
+        { autoAlpha: 1, y: 0, blur: 0, duration: 0.7, stagger: 0.06, ease: 'power3.out' },
         0.1,
       )
       ScrollTrigger.create({ trigger: brands.current, start: 'top 88%', once: true, onEnter: () => bt.play() })

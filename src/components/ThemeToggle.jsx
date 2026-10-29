@@ -17,7 +17,7 @@ export default function ThemeToggle() {
     apply(t)
   }
   return (
-    <div className="flex items-center rounded-full border border-line bg-panel p-[0.25em] text-[11px] font-semibold backdrop-blur-md sm:text-[clamp(11px,0.9vw,14px)]">
+    <div className="fx-glass flex items-center rounded-full border border-line bg-panel p-[0.25em] text-[11px] font-semibold backdrop-blur-md sm:text-[clamp(11px,0.9vw,14px)]">
       {['dark', 'light'].map((t) => (
         <button
           key={t}

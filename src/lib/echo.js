@@ -1,5 +1,6 @@
 // "Echo" text: a headline plus a few ghost copies that trail behind it while it
-// moves, the motion-smear look used for every heading swap.
+// moves, the motion-smear look used for every heading swap. (The headline's
+// blur only shows where it's cheap: see the blur tween property in motion.js.)
 const PEAKS = [0.42, 0.26, 0.14]
 
 function layers(el) {
@@ -7,13 +8,13 @@ function layers(el) {
   return { main, ghosts }
 }
 
-export function echoIn(tl, el, at = 0, { dur = 0.7, dist = 55, lag = 0.07, blur = true } = {}) {
+export function echoIn(tl, el, at = 0, { dur = 0.7, dist = 55, lag = 0.07 } = {}) {
   if (!el) return tl
   const { main, ghosts } = layers(el)
   tl.fromTo(
     main,
-    { yPercent: dist, autoAlpha: 0, filter: blur ? 'blur(10px)' : 'none' },
-    { yPercent: 0, autoAlpha: 1, filter: 'blur(0px)', duration: dur, ease: 'power3.out' },
+    { yPercent: dist, autoAlpha: 0, blur: 10 },
+    { yPercent: 0, autoAlpha: 1, blur: 0, duration: dur, ease: 'power3.out' },
     at,
   )
   ghosts.forEach((g, i) => {
@@ -25,14 +26,10 @@ export function echoIn(tl, el, at = 0, { dur = 0.7, dist = 55, lag = 0.07, blur 
   return tl
 }
 
-export function echoOut(tl, el, at = 0, { dur = 0.6, dist = 55, lag = 0.06, blur = true } = {}) {
+export function echoOut(tl, el, at = 0, { dur = 0.6, dist = 55, lag = 0.06 } = {}) {
   if (!el) return tl
   const { main, ghosts } = layers(el)
-  tl.to(
-    main,
-    { yPercent: -dist, autoAlpha: 0, filter: blur ? 'blur(10px)' : 'none', duration: dur, ease: 'power2.in' },
-    at,
-  )
+  tl.to(main, { yPercent: -dist, autoAlpha: 0, blur: 10, duration: dur, ease: 'power2.in' }, at)
   ghosts.forEach((g, i) => {
     const d = at + (i + 1) * lag
     tl.fromTo(g, { yPercent: 0 }, { yPercent: -dist * (1 - (i + 1) * 0.22), duration: dur, ease: 'power2.in', immediateRender: false }, d - lag)

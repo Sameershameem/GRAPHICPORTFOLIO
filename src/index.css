@@ -11,6 +11,7 @@
   --faint: rgb(244 244 242 / 0.08);
   --line: rgb(255 255 255 / 0.1);
   --panel: rgb(30 30 32 / 0.62);
+  --panel-opaque: rgb(27 27 29 / 0.94);
   --panel-solid: #141415;
   --glow: rgb(255 255 255 / 0.55);
   color-scheme: dark;
@@ -25,6 +26,7 @@
   --faint: rgb(17 17 18 / 0.06);
   --line: rgb(0 0 0 / 0.1);
   --panel: rgb(255 255 255 / 0.7);
+  --panel-opaque: rgb(250 249 247 / 0.95);
   --panel-solid: #e7e6e2;
   --glow: rgb(0 0 0 / 0.12);
   color-scheme: light;
@@ -148,6 +150,27 @@ html.lenis body {
   .no-scrollbar::-webkit-scrollbar {
     display: none;
   }
+}
+
+/* Phones and slower machines (html[data-quality], see lib/perf.js): frosted
+   glass is re-rendered every frame while anything behind it moves, so it's
+   dropped there and glass panels get a denser fill. (Animated blur is handled
+   by the blur tween property in lib/motion.js.) */
+html:not([data-quality='high']) :is(.glass, .fx-glass, .fx-glass-dark, .fx-glass-light) {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html:not([data-quality='high']) :is(.glass, .fx-glass) {
+  background-color: var(--panel-opaque) !important;
+}
+html:not([data-quality='high']) .fx-glass-dark {
+  background-color: rgb(0 0 0 / 0.93) !important;
+}
+html:not([data-quality='high']) .fx-glass-light {
+  background-color: rgb(255 255 255 / 0.45) !important;
+}
+html:not([data-quality='high']) .echo-ghost {
+  text-shadow: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

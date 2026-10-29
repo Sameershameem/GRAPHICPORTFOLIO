@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { gsap, ScrollTrigger, isTouch, reducedMotion, scrollToTarget } from '../lib/motion'
-import { Vortex } from '../lib/vortex'
+import { quality, onQualityChange, reportSlow } from '../lib/perf'
+import { startCanvas } from '../lib/offscreen'
 import { works, atlasInfo } from '../data/works'
 import { site } from '../data/site'
 import WordPill from '../components/WordPill'
@@ -11,37 +12,23 @@ const audiences = ['restaurants', 'schools', 'jewellers', 'travel brands', 'agen
 
 export default function Hero() {
   const wrap = useRef(null)
-  const canvas = useRef(null)
+  const canvasBox = useRef(null)
   const title = useRef(null)
   const corners = useRef(null)
 
   // Vortex canvas
   useEffect(() => {
-    const el = canvas.current
-    const mobile = window.innerWidth < 768 || isTouch
+    // A fresh canvas per run: once handed to a worker it can't be reused.
+    const el = document.createElement('canvas')
+    el.className = 'absolute inset-0 h-full w-full'
+    canvasBox.current.appendChild(el)
     let vortex
-    let raf = 0
-    let last = 0
     let visible = true
     let disposed = false
-
-    const loop = (t) => {
-      raf = requestAnimationFrame(loop)
-      const dt = last ? (t - last) / 1000 : 0.016
-      last = t
-      vortex.update(reducedMotion ? dt * 0.15 : dt)
-      vortex.draw()
-    }
-    const start = () => {
-      if (!raf && visible && !document.hidden && vortex) {
-        last = 0
-        raf = requestAnimationFrame(loop)
-      }
-    }
-    const stop = () => {
-      cancelAnimationFrame(raf)
-      raf = 0
-    }
+    // Small-viewport height (the title's box), stable while phone toolbars move.
+    const svh = () => title.current?.parentElement?.clientHeight || window.innerHeight
+    const resize = () => vortex.call('resize', el.clientWidth, el.clientHeight, svh(), Math.min(window.devicePixelRatio || 1, quality.s.dpr))
+    const run = () => vortex && vortex.run(visible && !document.hidden)
 
     // Cards vanish around the title block (wordmark + subtitle). Measured only
     // while the title is untransformed (not mid-intro, not scrolled).
@@ -54,62 +41,76 @@ export default function Hero() {
       const c = el.getBoundingClientRect()
       const x0 = Math.min(a.left, b.left)
       const y0 = Math.min(a.top, b.top)
-      vortex.setTitle(x0 - c.left, y0 - c.top, Math.max(a.right, b.right) - x0, Math.max(a.bottom, b.bottom) - y0)
+      vortex.call('setTitle', x0 - c.left, y0 - c.top, Math.max(a.right, b.right) - x0, Math.max(a.bottom, b.bottom) - y0)
     }
 
-    const img = new Image()
-    img.decoding = 'async'
-    img.src = atlasInfo.src
-    img
-      .decode()
-      .catch(() => new Promise((r) => (img.complete ? r() : (img.onload = r))))
-      .then(() => {
-        if (disposed) return
-        vortex = new Vortex(el, img, works, { mobile })
+    // The atlas file goes to the engine as-is and is decoded on its thread.
+    fetch(atlasInfo.src)
+      .then((r) => r.blob())
+      .then(
+        (atlas) =>
+          !disposed &&
+          startCanvas({
+            canvas: el,
+            worker: () => new Worker(new URL('../lib/vortex.worker.js', import.meta.url), { type: 'module' }),
+            load: () => import('../lib/vortex'),
+            onSlow: reportSlow,
+            options: { atlas, works: works.map((w) => ({ rect: w.rect })), settings: quality.s, intro: reducedMotion ? 0 : 1, timeScale: reducedMotion ? 0.15 : 1 },
+          }),
+      )
+      .then((v) => {
+        if (!v) return
+        if (disposed) return v.dispose()
+        vortex = v
+        resize()
         aim()
         document.fonts?.ready.then(aim)
         setTimeout(aim, 1800) // after the title's intro transform has settled
-        if (reducedMotion) vortex.intro = 0
-        gsap.to(el, { opacity: 1, duration: 1.2, ease: 'power2.out' })
-        start()
+        update(st)
+        run()
+        gsap.to(canvasBox.current, { opacity: 1, duration: 1.2, ease: 'power2.out' })
       })
+      .catch(() => {}) // atlas unavailable (offline): the hero still works without the cards
 
+    // Phones fire resize whenever the toolbar slides; only real size changes matter.
+    let size = ''
     const onResize = () => {
       if (!vortex) return
-      vortex.resize()
+      const next = `${window.innerWidth}x${svh()}`
+      if (next === size) return
+      size = next
+      resize()
       if (window.scrollY < 40) aim()
     }
-    const onMove = (e) => vortex && vortex.pointer(e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5)
-    const onVis = () => (document.hidden ? stop() : start())
+    const offQuality = onQualityChange(() => {
+      if (!vortex) return
+      vortex.call('setSettings', quality.s)
+      resize()
+    })
+    const onMove = (e) => vortex && vortex.call('pointer', e.clientX / window.innerWidth - 0.5, e.clientY / window.innerHeight - 0.5)
     const io = new IntersectionObserver(([entry]) => {
       visible = entry.isIntersecting
-      visible ? start() : stop()
+      run()
     })
     io.observe(wrap.current)
     window.addEventListener('resize', onResize)
     if (!isTouch) window.addEventListener('pointermove', onMove, { passive: true })
-    document.addEventListener('visibilitychange', onVis)
+    document.addEventListener('visibilitychange', run)
 
-    const st = ScrollTrigger.create({
-      trigger: wrap.current,
-      start: 'top top',
-      end: 'bottom bottom',
-      onUpdate: (self) => {
-        if (!vortex) return
-        const p = self.progress
-        vortex.warp = p
-        vortex.alpha = 1 - gsap.utils.clamp(0, 1, (p - 0.7) / 0.2)
-      },
-    })
+    // Scrolling speeds the flow up, then the field fades out.
+    const update = (self) => vortex && vortex.call('scroll', self.progress, 1 - gsap.utils.clamp(0, 1, (self.progress - 0.7) / 0.2))
+    const st = ScrollTrigger.create({ trigger: wrap.current, start: 'top top', end: 'bottom bottom', onUpdate: update, onRefresh: update })
 
     return () => {
       disposed = true
-      stop()
+      vortex && vortex.dispose()
+      el.remove()
+      offQuality()
       io.disconnect()
       st.kill()
       window.removeEventListener('resize', onResize)
       window.removeEventListener('pointermove', onMove)
-      document.removeEventListener('visibilitychange', onVis)
+      document.removeEventListener('visibilitychange', run)
     }
   }, [])
 
@@ -118,15 +119,15 @@ export default function Hero() {
     const ctx = gsap.context(() => {
       gsap.fromTo(
         title.current.children,
-        { autoAlpha: 0, filter: 'blur(14px)', y: 14 },
-        { autoAlpha: 1, filter: 'blur(0px)', y: 0, duration: 1.4, ease: 'power3.out', stagger: 0.12, delay: 0.15 },
+        { autoAlpha: 0, y: 14, blur: 14 },
+        { autoAlpha: 1, y: 0, blur: 0, duration: 1.4, ease: 'power3.out', stagger: 0.12, delay: 0.15 },
       )
       gsap.fromTo(corners.current.children, { autoAlpha: 0 }, { autoAlpha: 1, duration: 1, delay: 0.8 })
 
       const tl = gsap.timeline({
         scrollTrigger: { trigger: wrap.current, start: 'top top', end: '16% top', scrub: true },
       })
-      tl.to(title.current, { scale: 0.86, autoAlpha: 0, filter: 'blur(5px)', ease: 'power1.in', duration: 1 }, 0)
+      tl.to(title.current, { scale: 0.86, autoAlpha: 0, blur: 5, ease: 'power1.in', duration: 1 }, 0)
       tl.to(corners.current, { autoAlpha: 0, duration: 0.3 }, 0)
     })
     return () => ctx.revert()
@@ -135,7 +136,7 @@ export default function Hero() {
   return (
     <section id="top" ref={wrap} className="relative h-[170vh]">
       <div className="sticky top-0 h-lvh w-full overflow-hidden">
-        <canvas ref={canvas} className="absolute inset-0 h-full w-full opacity-0" aria-hidden="true" />
+        <div ref={canvasBox} className="absolute inset-0 opacity-0" aria-hidden="true" />
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex h-svh items-center justify-center px-4">
           <div ref={title} className="pointer-events-auto flex flex-col items-center text-center will-change-transform">

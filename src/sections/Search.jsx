@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { gsap, ScrollTrigger, isTouch } from '../lib/motion'
+import { gsap, ScrollTrigger } from '../lib/motion'
+import { quality } from '../lib/perf'
 import { echoIn } from '../lib/echo'
 import { byId } from '../data/works'
 import Echo from '../components/Echo'
@@ -34,7 +35,7 @@ export default function Search() {
   useEffect(() => {
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({ paused: true })
-      echoIn(tl, head.current, 0, { blur: !isTouch })
+      echoIn(tl, head.current, 0)
       tl.fromTo(para.current, { autoAlpha: 0, y: 16 }, { autoAlpha: 1, y: 0, duration: 0.6, ease: 'power2.out' }, 0.25)
       tl.fromTo(
         imgs.current,
@@ -113,18 +114,22 @@ export default function Search() {
         {slots.map((s, i) => {
           const work = byId[s.id]
           const dim = active && work.tag !== active
+          // Greyed-out matches; the cheapest look (fade only) on the lowest tier.
+          const dimFilter = dim && quality.tier !== 'low' ? 'grayscale(0.6)' : 'none'
           return (
             <div key={s.id} className="absolute will-change-transform" style={{ left: `${s.x}%`, top: `${s.y}%`, width: `${s.w}%` }}>
               <div ref={(el) => (imgs.current[i] = el)} style={{ visibility: 'hidden' }}>
                 <img
                   src={work.sm}
+                  srcSet={work.srcSet}
+                  sizes={`(min-width: 768px) ${(s.w * 0.6).toFixed(1)}vw, ${s.w}vw`}
                   alt={`${work.title} — ${work.client}`}
                   width={work.w}
                   height={work.h}
                   loading="lazy"
                   decoding="async"
                   className="card-shadow w-full rounded-[3px] transition-[opacity,filter,transform] duration-500"
-                  style={{ opacity: dim ? 0.22 : 1, filter: dim ? 'grayscale(0.6) blur(1px)' : 'none', transform: active && !dim ? 'scale(1.03)' : 'none' }}
+                  style={{ opacity: dim ? 0.22 : 1, filter: dimFilter, transform: active && !dim ? 'scale(1.03)' : 'none' }}
                 />
               </div>
             </div>

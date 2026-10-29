@@ -42,7 +42,11 @@ export default function Lightbox() {
 
   useEffect(() => {
     if (open && img.current) {
-      gsap.fromTo(img.current, { autoAlpha: 0, scale: 0.96, filter: 'blur(8px)' }, { autoAlpha: 1, scale: 1, filter: 'blur(0px)', duration: 0.5, ease: 'power3.out' })
+      gsap.fromTo(
+        img.current,
+        { autoAlpha: 0, scale: 0.96, blur: 8 },
+        { autoAlpha: 1, scale: 1, blur: 0, duration: 0.5, ease: 'power3.out' },
+      )
     }
   }, [index, open])
 
@@ -53,7 +57,7 @@ export default function Lightbox() {
       role="dialog"
       aria-modal="true"
       aria-label={`${work.title} — ${work.client}`}
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/85 px-4 py-16 text-white backdrop-blur-xl"
+      className="fx-glass-dark fixed inset-0 z-[100] flex flex-col items-center justify-center bg-black/85 px-4 py-16 text-white backdrop-blur-xl"
       onClick={(e) => e.target === e.currentTarget && close()}
       onTouchStart={(e) => (touch.current = e.touches[0].clientX)}
       onTouchEnd={(e) => {

@@ -11,6 +11,9 @@
 // Everything is a pure function of one flow clock, so motion is continuous by
 // construction. Scrolling only speeds that clock up (and pulls the field in a
 // little), exactly like the reference.
+//
+// The engine only needs a 2D canvas, so it runs the same on the page or in a
+// worker with an OffscreenCanvas (see offscreen.js).
 
 const DEG = Math.PI / 180
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v)
@@ -22,6 +25,16 @@ const smooth = (a, b, v) => {
 const hash = (a, b) => {
   const s = Math.sin(a * 127.1 + b * 311.7) * 43758.5453
   return s - Math.floor(s)
+}
+// Scratch canvas that works on the page and in a worker.
+const makeCanvas = (w, h) => {
+  w = Math.max(1, Math.round(w))
+  h = Math.max(1, Math.round(h))
+  if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h)
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  return c
 }
 
 // Measured timing
@@ -240,12 +253,15 @@ function departCurve(vc, len, steps = 64) {
 // --- engine ------------------------------------------------------------------
 
 export class Vortex {
-  constructor(canvas, atlasImg, works, { mobile = false } = {}) {
+  // canvas: a canvas or OffscreenCanvas. atlas: the decoded graphics atlas
+  // (ImageBitmap or image). works: [{ rect }] into the atlas. settings: the
+  // quality tier's settings (lib/perf.js). Call resize() before drawing.
+  constructor(canvas, atlas, works, settings) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d', { alpha: true })
-    this.src = atlasImg
+    this.src = atlas
     this.works = works
-    this.mobile = mobile
+    this.settings = settings
     this.texScale = 0
     // Start mid-flow so the piles are already full on first paint.
     this.clock = 40 * PERIOD + 0.35
@@ -254,12 +270,12 @@ export class Vortex {
     this.alpha = 1
     this.intro = 1
     this.speed = 1
+    this.timeScale = 1
     this.px = 0
     this.py = 0
     this.tx = 0
     this.ty = 0
     this.title = null
-    this.resize()
   }
 
   // Card textures, pre-scaled once to about the size they are drawn at, so
@@ -270,24 +286,18 @@ export class Vortex {
   // the frosted piles cheap to draw on phones.
   buildTextures(scale) {
     const { src, works } = this
-    const W = src.naturalWidth
-    const H = src.naturalHeight
-    const canvas = (w, h) => {
-      const c = document.createElement('canvas')
-      c.width = Math.max(1, Math.round(w))
-      c.height = Math.max(1, Math.round(h))
-      return c
-    }
+    const W = src.naturalWidth || src.width
+    const H = src.naturalHeight || src.height
 
-    const sharp = canvas(W * scale, H * scale)
+    const sharp = makeCanvas(W * scale, H * scale)
     const sx = sharp.getContext('2d')
     sx.imageSmoothingQuality = 'high'
     sx.drawImage(src, 0, 0, sharp.width, sharp.height)
 
     const fs = Math.max(0.16, scale / 2.5)
-    const frost = canvas(W * fs, H * fs)
+    const frost = makeCanvas(W * fs, H * fs)
     const fx = frost.getContext('2d')
-    const tmp = canvas(2, 2)
+    const tmp = makeCanvas(2, 2)
     const tx = tmp.getContext('2d')
     fx.imageSmoothingQuality = 'high'
     for (const w of works) {
@@ -321,19 +331,23 @@ export class Vortex {
     this.layout()
   }
 
-  resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, this.mobile ? 1.25 : 2)
-    const w = this.canvas.clientWidth
-    const h = this.canvas.clientHeight
+  // w, h: canvas size in CSS pixels. vh: the visible page height to lay the
+  // flows out in; pass the *small* viewport height so the piles don't jump
+  // when a phone's toolbar hides. dpr: pixel ratio to render at.
+  resize(w, h, vh, dpr) {
+    vh = Math.min(h, vh)
+    // Re-allocating the canvas is expensive and clears it: skip when nothing changed.
+    if (w === this.w && h === this.h && dpr === this.dpr && vh === this.vh) return
     this.w = w
     this.h = h
     this.dpr = dpr
     this.canvas.width = Math.round(w * dpr)
     this.canvas.height = Math.round(h * dpr)
+    this.blank = false
     // Resizing resets context state. Textures are pre-scaled, so the cheap
     // sampler is enough.
     this.ctx.imageSmoothingQuality = 'low'
-    this.vh = Math.min(h, window.innerHeight)
+    this.vh = vh
     this.layout()
     // Texture resolution follows the largest card on screen (rebuilt only
     // when that changes noticeably).
@@ -383,6 +397,26 @@ export class Vortex {
   pointer(nx, ny) {
     this.tx = nx
     this.ty = ny
+  }
+
+  // Scroll progress through the hero (speeds the flow up) and field opacity.
+  scroll(warp, alpha) {
+    this.warp = warp
+    this.alpha = alpha
+  }
+
+  setSettings(settings) {
+    this.settings = settings
+  }
+
+  // Animation loop hooks (offscreen.js): draw a frame; rest once faded out.
+  frame(t, dt) {
+    this.update(dt * this.timeScale)
+    this.draw()
+  }
+
+  get paused() {
+    return this.hidden && this.blank
   }
 
   update(dt) {
@@ -457,11 +491,26 @@ export class Vortex {
     this.ctx.drawImage(img, sx * k, sy * k, sw * k, sh * k, -w / 2, -h / 2, w, h)
   }
 
+  // Fully faded out (scrolled past the hero)?
+  get hidden() {
+    return this.alpha <= 0.002
+  }
+
   draw() {
     const { ctx } = this
+    // Once faded out, clear a single time instead of re-uploading an empty
+    // canvas every frame.
+    if (this.hidden || !this.flows) {
+      if (!this.blank) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0)
+        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
+        this.blank = true
+      }
+      return
+    }
+    this.blank = false
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height)
-    if (this.alpha <= 0.002 || !this.flows) return
 
     const T = this.clock
     // Pull toward the title while scrolling (measured ~6% by fade-out).
@@ -471,10 +520,10 @@ export class Vortex {
     // Motion smear only when the flow is really fast (scrolling).
     const smear = clamp01((this.flow - 1.6) / 4)
     // Trailing copies: fast departing cards get more than the slower piles;
-    // phones smear only the departing cards, to keep scrolling light.
+    // lighter devices smear less (or not at all) to keep scrolling smooth.
     const on = smear > 0
-    const pileGhosts = on && !this.mobile ? 1 : 0
-    const departGhosts = on ? (this.mobile ? 1 : 2) : 0
+    const pileGhosts = on ? this.settings.pileGhosts : 0
+    const departGhosts = on ? this.settings.departGhosts : 0
     const frameFlow = this.flow / 60
     const place = (p) => [this.cx + (p.x - this.cx) * z + offX, this.cy + (p.y - this.cy) * z + offY, p.size * z]
 
@@ -522,4 +571,23 @@ export class Vortex {
     }
     ctx.globalAlpha = 1
   }
+}
+
+// Decodes the atlas file on the calling thread's background decoder (in a
+// worker, entirely off the page's main thread).
+async function decode(blob) {
+  if (typeof createImageBitmap === 'function') return createImageBitmap(blob)
+  const img = new Image()
+  img.src = URL.createObjectURL(blob)
+  await img.decode()
+  return img
+}
+
+// atlas: the atlas image file (Blob). works: [{ rect }]. intro: 1 plays the
+// fade-in. timeScale: animation speed (slowed for reduced motion).
+export async function create(canvas, { atlas, works, settings, intro = 1, timeScale = 1 }) {
+  const v = new Vortex(canvas, await decode(atlas), works, settings)
+  v.intro = intro
+  v.timeScale = timeScale
+  return v
 }

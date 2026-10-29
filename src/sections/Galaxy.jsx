@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
-import { gsap, ScrollTrigger, isTouch } from '../lib/motion'
+import { gsap, ScrollTrigger, setStyle } from '../lib/motion'
+import { quality, onQualityChange, reportSlow } from '../lib/perf'
+import { startCanvas } from '../lib/offscreen'
 import { echoIn } from '../lib/echo'
-import { Starfield } from '../lib/starfield'
 import { openWork, onThemeChange } from '../lib/lightbox'
 import { works } from '../data/works'
 import Echo from '../components/Echo'
@@ -13,19 +14,45 @@ const jitter = (i) => {
   return s - Math.floor(s)
 }
 const order = [12, 3, 9, 0, 18, 6, 15, 10, 1, 13, 4, 19, 7, 16, 2, 11, 5, 17, 8, 14].map((i) => works[i])
+// Image size hint: card width, clamp(118px, 13.5vw, 220px), x the 1.15 centre scale.
+const cardSizes = '(max-width: 874px) 136px, (max-width: 1630px) 15.5vw, 253px'
 
 export default function Galaxy() {
   const root = useRef(null)
-  const canvas = useRef(null)
+  const starBox = useRef(null)
   const head = useRef(null)
   const copy = useRef(null)
   const viewport = useRef(null)
   const cards = useRef([])
 
-  // Starfield + carousel loop
+  // Starfield (on its own thread where possible, see offscreen.js) + carousel loop
   useEffect(() => {
-    const mobile = window.innerWidth < 768
-    const field = new Starfield(canvas.current, { count: mobile ? 420 : 1100, mobile })
+    // A fresh canvas per run: once handed to a worker it can't be reused.
+    const box = starBox.current
+    const el = document.createElement('canvas')
+    el.className = 'absolute inset-0 h-full w-full'
+    box.appendChild(el)
+    let stars
+    let disposed = false
+    const color = () => getComputedStyle(box).color
+    const sizeStars = () => stars && stars.call('resize', box.clientWidth, box.clientHeight, Math.min(window.devicePixelRatio || 1, quality.s.dpr))
+    const runStars = () => stars && stars.run(state.visible && !document.hidden)
+    startCanvas({
+      canvas: el,
+      worker: () => new Worker(new URL('../lib/starfield.worker.js', import.meta.url), { type: 'module' }),
+      load: () => import('../lib/starfield'),
+      onSlow: reportSlow,
+      options: { settings: quality.s, color: color() },
+    })
+      .then((s) => {
+        if (disposed) return s.dispose()
+        stars = s
+        sizeStars()
+        stars.call('setAlpha', starAlpha(st))
+        runStars()
+      })
+      .catch(() => {}) // no canvas: the section works without stars
+
     const state = { x: 0, v: 0, drag: false, lastX: 0, lastT: 0, moved: 0, visible: false }
     let W = viewport.current.clientWidth
     const spacing = () => (W < 640 ? 165 : Math.max(220, W * 0.215))
@@ -37,7 +64,6 @@ export default function Galaxy() {
       raf = requestAnimationFrame(loop)
       const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016)
       last = t
-      field.frame(dt, t / 1000)
 
       if (!state.drag) {
         state.x += state.v * dt
@@ -53,16 +79,16 @@ export default function Galaxy() {
         const cx = px + sp / 2
         const n = (cx - W / 2) / (W / 2)
         if (n < -1.6 || n > 1.6) {
-          el.style.visibility = 'hidden'
+          setStyle(el, 'visibility', 'hidden')
           continue
         }
-        el.style.visibility = 'visible'
+        setStyle(el, 'visibility', 'visible')
         const n2 = n * n
         const j = jitter(i)
         const scale = Math.max(0.55, 1 - 0.24 * n2) * (0.85 + j * 0.3)
         const y = -n2 * (W < 640 ? 26 : 46) + (j - 0.5) * 50
-        el.style.transform = `translate3d(${px}px,${y}px,0) rotateY(${-n * 16}deg) scale(${scale})`
-        el.style.opacity = String(Math.max(0, Math.min(1, 1.6 - Math.abs(n))))
+        setStyle(el, 'transform', `translate3d(${px}px,${y}px,0) rotateY(${-n * 16}deg) scale(${scale})`)
+        setStyle(el, 'opacity', Math.max(0, Math.min(1, 1.6 - Math.abs(n))))
       }
     }
     const start = () => {
@@ -78,6 +104,7 @@ export default function Galaxy() {
     const io = new IntersectionObserver(([e]) => {
       state.visible = e.isIntersecting
       state.visible ? start() : stop()
+      runStars()
     })
     io.observe(root.current)
 
@@ -119,27 +146,37 @@ export default function Galaxy() {
     const onResize = () => {
       W = vp.clientWidth
       sp = spacing()
-      field.resize()
+      sizeStars() // no-op unless the canvas really changed size
     }
     window.addEventListener('resize', onResize)
-    const offTheme = onThemeChange(() => field.refreshColor())
-    const onVis = () => (document.hidden ? stop() : start())
+    const offQuality = onQualityChange(() => {
+      stars && stars.call('setSettings', quality.s)
+      sizeStars()
+    })
+    const offTheme = onThemeChange(() => stars && stars.call('setColor', color()))
+    const onVis = () => {
+      document.hidden ? stop() : start()
+      runStars()
+    }
     document.addEventListener('visibilitychange', onVis)
 
+    // Stars fade in as the section arrives and out as it leaves.
+    const starAlpha = (self) => Math.min(1, self.progress * 4) * Math.min(1, (1 - self.progress) * 3.5)
     const st = ScrollTrigger.create({
       trigger: root.current,
       start: 'top 85%',
       end: 'bottom top',
-      onUpdate: (self) => {
-        const p = self.progress
-        field.alpha = Math.min(1, p * 4) * Math.min(1, (1 - p) * 3.5)
-      },
+      onUpdate: (self) => stars && stars.call('setAlpha', starAlpha(self)),
     })
 
     return () => {
+      disposed = true
+      stars && stars.dispose()
+      el.remove()
       stop()
       io.disconnect()
       st.kill()
+      offQuality()
       offTheme()
       window.removeEventListener('resize', onResize)
       document.removeEventListener('visibilitychange', onVis)
@@ -155,7 +192,7 @@ export default function Galaxy() {
   useEffect(() => {
     const ctx = gsap.context(() => {
       const tl = gsap.timeline({ paused: true })
-      echoIn(tl, head.current, 0, { blur: !isTouch })
+      echoIn(tl, head.current, 0)
       tl.fromTo(copy.current.children, { autoAlpha: 0, y: 14 }, { autoAlpha: 1, y: 0, duration: 0.7, stagger: 0.1, ease: 'power2.out' }, 0.2)
       tl.fromTo(viewport.current, { autoAlpha: 0, y: 70 }, { autoAlpha: 1, y: 0, duration: 1.1, ease: 'power3.out' }, 0.1)
       ScrollTrigger.create({ trigger: root.current, start: 'top 62%', once: true, onEnter: () => tl.play() })
@@ -165,7 +202,7 @@ export default function Galaxy() {
 
   return (
     <section id="about" ref={root} className="relative flex min-h-[115svh] flex-col justify-center overflow-hidden py-24">
-      <canvas ref={canvas} className="pointer-events-none absolute inset-0 h-full w-full text-fg" aria-hidden="true" />
+      <div ref={starBox} className="pointer-events-none absolute inset-0 text-fg" aria-hidden="true" />
 
       <div className="relative z-10 mx-auto flex w-full max-w-[1300px] flex-col items-center gap-5 px-6 text-center md:flex-row md:items-start md:justify-center md:gap-[9vw] md:text-left">
         <Echo ref={head} className="serif-head text-glow text-[clamp(38px,4.15vw,74px)]">
@@ -198,6 +235,8 @@ export default function Galaxy() {
             >
               <img
                 src={w.sm}
+                srcSet={w.srcSet}
+                sizes={cardSizes}
                 alt={`${w.title} — ${w.client}`}
                 width={w.w}
                 height={w.h}

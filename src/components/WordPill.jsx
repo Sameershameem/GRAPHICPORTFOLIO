@@ -23,11 +23,11 @@ export default function WordPill({ words, interval = 2600, delay = 0, className 
         i = (i + 1) % words.length
         next.textContent = words[i]
         gsap.to(box.current, { width: next.offsetWidth, duration: 0.7, ease: 'power3.inOut' })
-        gsap.to(cur, { autoAlpha: 0, yPercent: -30, filter: 'blur(5px)', duration: 0.45, ease: 'power2.in' })
+        gsap.to(cur, { autoAlpha: 0, yPercent: -30, blur: 5, duration: 0.45, ease: 'power2.in' })
         gsap.fromTo(
           next,
-          { autoAlpha: 0, yPercent: 30, filter: 'blur(5px)' },
-          { autoAlpha: 1, yPercent: 0, filter: 'blur(0px)', duration: 0.6, delay: 0.2, ease: 'power3.out' },
+          { autoAlpha: 0, yPercent: 30, blur: 5 },
+          { autoAlpha: 1, yPercent: 0, blur: 0, duration: 0.6, delay: 0.2, ease: 'power3.out' },
         )
         ;[cur, next] = [next, cur]
       }

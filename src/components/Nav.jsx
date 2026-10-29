@@ -26,8 +26,8 @@ export default function Nav() {
       ScrollTrigger.create({
         trigger: '#contact',
         start: 'top 20%',
-        onEnter: () => gsap.to(bar.current, { autoAlpha: 0, y: -14, filter: 'blur(6px)', duration: 0.5, ease: 'power2.in' }),
-        onLeaveBack: () => gsap.to(bar.current, { autoAlpha: 1, y: 0, filter: 'blur(0px)', duration: 0.5, ease: 'power2.out' }),
+        onEnter: () => gsap.to(bar.current, { autoAlpha: 0, y: -14, blur: 6, duration: 0.5, ease: 'power2.in' }),
+        onLeaveBack: () => gsap.to(bar.current, { autoAlpha: 1, y: 0, blur: 0, duration: 0.5, ease: 'power2.out' }),
       })
     })
     return () => ctx.revert()
@@ -51,7 +51,7 @@ export default function Nav() {
       </a>
       <nav
         ref={bar}
-        className="pointer-events-auto mx-auto mt-2.5 flex w-max items-center gap-[0.15em] rounded-[1.05em] border border-line bg-panel p-[0.4em] pl-[0.75em] text-[12px] font-medium backdrop-blur-md sm:backdrop-blur-xl sm:mt-3 sm:text-[clamp(13px,1.18vw,18px)]"
+        className="fx-glass pointer-events-auto mx-auto mt-2.5 flex w-max items-center gap-[0.15em] rounded-[1.05em] border border-line bg-panel p-[0.4em] pl-[0.75em] text-[12px] font-medium backdrop-blur-md sm:backdrop-blur-xl sm:mt-3 sm:text-[clamp(13px,1.18vw,18px)]"
       >
         <a href="#top" onClick={(e) => go(e, 0)} aria-label={`${site.name} home`} className="mr-[0.3em] grid size-[1.7em] place-items-center">
           <LogoDots className="size-[1.15em]" />

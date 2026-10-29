@@ -5,7 +5,7 @@ import { gsap, ScrollTrigger, scroller, isTouch, reducedMotion } from './motion'
 export function useSmoothScroll() {
   useEffect(() => {
     if (isTouch || reducedMotion) return
-    const lenis = new Lenis({ lerp: 0.085, wheelMultiplier: 0.95, smoothWheel: true })
+    const lenis = new Lenis({ lerp: 0.1, smoothWheel: true })
     scroller.lenis = lenis
     lenis.on('scroll', ScrollTrigger.update)
     const tick = (time) => lenis.raf(time * 1000)

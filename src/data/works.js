@@ -36,6 +36,8 @@ export const works = list.map((w, i) => ({
   xs: `${base}${w.id}-xs.webp`,
   sm: `${base}${w.id}-sm.webp`,
   lg: `${base}${w.id}-lg.webp`,
+  // Cards: lets phones pick the 240px file when that's sharp enough.
+  srcSet: `${base}${w.id}-xs.webp 240w, ${base}${w.id}-sm.webp 520w`,
   rect: atlas.rects[w.id],
 }))
 

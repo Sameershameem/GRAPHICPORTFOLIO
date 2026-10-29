@@ -11,6 +11,16 @@ npm run build    # production build in dist/
 npm run preview  # serve the production build
 ```
 
+## Performance
+
+- The hero cards, starfield and 3D rocks draw on their own threads (Web Workers +
+  OffscreenCanvas), so scrolling never waits on them. Older browsers draw them on
+  the page instead.
+- Rendering quality adapts to the device (`src/lib/perf.js`): desktops get blur and
+  frosted glass; phones get solid panels and lighter canvases; quality steps down
+  on its own if a device can't keep a smooth frame rate. Add `?quality=low`,
+  `?quality=mid` or `?quality=high` to the URL to try a level on any device.
+
 ## Editing content
 
 - **Designer details / contact links:** `src/data/site.js`
