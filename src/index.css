@@ -169,8 +169,10 @@ html:not([data-quality='high']) .fx-glass-dark {
 html:not([data-quality='high']) .fx-glass-light {
   background-color: rgb(255 255 255 / 0.45) !important;
 }
+/* The echo copies only read as motion smear together with blur; without it
+   they look like doubled text (and stay put if a scroll stops mid-swap). */
 html:not([data-quality='high']) .echo-ghost {
-  text-shadow: none;
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
