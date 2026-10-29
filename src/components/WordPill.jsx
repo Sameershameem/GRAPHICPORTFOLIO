@@ -1,10 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { gsap, reducedMotion } from '../lib/motion'
-import { quality } from '../lib/perf'
 
 // Outlined pill whose word cycles while the pill smoothly resizes to fit the
-// next word: a blur cross-fade where blur is cheap, otherwise a clean roll
-// (old word out the top, new word in from below, never overlapping).
+// next word: the old word rolls out the top, then the new one rolls in from
+// below (softened with blur where that's cheap), never overlapping.
 export default function WordPill({ words, interval = 2600, delay = 0, className = '' }) {
   const box = useRef(null)
   const a = useRef(null)
@@ -24,13 +23,12 @@ export default function WordPill({ words, interval = 2600, delay = 0, className 
       if (!document.hidden) {
         i = (i + 1) % words.length
         next.textContent = words[i]
-        const soft = quality.tier === 'high'
         gsap.to(box.current, { width: next.offsetWidth, duration: 0.7, ease: 'power3.inOut' })
-        gsap.to(cur, { autoAlpha: 0, yPercent: soft ? -30 : -100, blur: 5, duration: soft ? 0.45 : 0.35, ease: 'power2.in' })
+        gsap.to(cur, { autoAlpha: 0, yPercent: -100, blur: 5, duration: 0.35, ease: 'power2.in' })
         gsap.fromTo(
           next,
-          { autoAlpha: 0, yPercent: soft ? 30 : 100, blur: 5 },
-          { autoAlpha: 1, yPercent: 0, blur: 0, duration: 0.6, delay: soft ? 0.2 : 0.28, ease: 'power3.out' },
+          { autoAlpha: 0, yPercent: 100, blur: 5 },
+          { autoAlpha: 1, yPercent: 0, blur: 0, duration: 0.6, delay: 0.28, ease: 'power3.out' },
         )
         ;[cur, next] = [next, cur]
       }
